@@ -3,10 +3,32 @@ const Attendance = require("../models/Attendance");
 const mongoose = require('mongoose');
 
 // Helper function to validate date format
-// Helper function
 function isValidDate(dateString) {
   return !isNaN(Date.parse(dateString)) && 
          /^\d{4}-\d{2}-\d{2}$/.test(dateString);
+}
+
+// Helper function to convert local time to UTC
+function convertToUTC(date, timeString) {
+  if (!timeString) return new Date(date);
+  
+  const [hours, minutes] = timeString.split(':').map(Number);
+  const localDate = new Date(date);
+  localDate.setHours(hours, minutes || 0, 0, 0);
+  
+  // Convert to UTC
+  return new Date(localDate.getTime() - (localDate.getTimezoneOffset() * 60000));
+}
+
+// Helper function to get current UTC date (start of day)
+function getCurrentUTCDate() {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+// Helper function to get current UTC datetime
+function getCurrentUTCDateTime() {
+  return new Date();
 }
 
 // Create a new staff member
@@ -196,8 +218,7 @@ exports.deleteStaff = async (req, res) => {
   }
 };
 
-
-// Record attendance (check-in/check-out)
+// Record attendance (check-in/check-out) with UTC timezone handling
 exports.recordAttendance = async (req, res) => {
   try {
     const { staffId, action, time, date } = req.body;
@@ -239,7 +260,7 @@ exports.recordAttendance = async (req, res) => {
       });
     }
     
-    // Date handling - allow manual date or use today
+    // Date handling - allow manual date or use today (in UTC)
     let recordDate;
     if (date) {
       if (!isValidDate(date)) {
@@ -250,14 +271,15 @@ exports.recordAttendance = async (req, res) => {
           received: date
         });
       }
-      recordDate = new Date(date);
-      recordDate.setHours(0, 0, 0, 0); // Normalize to start of day
+      // Parse date as UTC
+      const [year, month, day] = date.split('-').map(Number);
+      recordDate = new Date(Date.UTC(year, month - 1, day));
     } else {
-      recordDate = new Date();
-      recordDate.setHours(0, 0, 0, 0);
+      // Use current UTC date
+      recordDate = getCurrentUTCDate();
     }
     
-    // Time handling
+    // Time handling with UTC conversion
     let recordTime;
     if (time) {
       // Validate time format (accepts both 12-hour and 24-hour formats)
@@ -271,7 +293,7 @@ exports.recordAttendance = async (req, res) => {
         });
       }
       
-      // Parse time
+      // Parse time and convert to UTC
       let hours, minutes;
       const timeLower = time.toLowerCase();
       
@@ -296,12 +318,27 @@ exports.recordAttendance = async (req, res) => {
         });
       }
       
-      // Combine date and time
-      recordTime = new Date(recordDate);
-      recordTime.setHours(hours, minutes || 0, 0, 0);
+      // Create date with local time, then convert to UTC
+      const localDateTime = new Date(recordDate);
+      localDateTime.setHours(hours, minutes || 0, 0, 0);
+      
+      // Convert to UTC
+      recordTime = new Date(localDateTime.getTime() - (localDateTime.getTimezoneOffset() * 60000));
     } else {
-      // Use current time if not provided
-      recordTime = new Date();
+      // Use current UTC time if not provided
+      recordTime = getCurrentUTCDateTime();
+    }
+    
+    // Validate that time is not in the future (UTC comparison)
+    const currentUTCTime = getCurrentUTCDateTime();
+    if (recordTime > currentUTCTime) {
+      return res.status(400).json({
+        success: false,
+        error: 'Cannot record attendance for future time',
+        currentUTCTime: currentUTCTime.toISOString(),
+        providedTime: recordTime.toISOString(),
+        suggestion: 'Check your timezone settings'
+      });
     }
     
     // Check for existing attendance record
@@ -313,11 +350,15 @@ exports.recordAttendance = async (req, res) => {
     // Validate against duplicate actions
     if (existingRecord) {
       if (action === 'checkIn' && existingRecord.checkIn) {
-        const existingTime = existingRecord.checkIn.toLocaleTimeString();
+        const existingTime = existingRecord.checkIn.toLocaleTimeString('en-US', {
+          timeZone: 'UTC',
+          hour: '2-digit',
+          minute: '2-digit'
+        });
         return res.status(400).json({
           success: false,
           error: 'Already checked in today',
-          existingCheckIn: existingTime,
+          existingCheckIn: existingTime + ' UTC',
           suggestion: 'Record check-out instead'
         });
       }
@@ -331,11 +372,15 @@ exports.recordAttendance = async (req, res) => {
           });
         }
         if (existingRecord.checkOut) {
-          const existingTime = existingRecord.checkOut.toLocaleTimeString();
+          const existingTime = existingRecord.checkOut.toLocaleTimeString('en-US', {
+            timeZone: 'UTC',
+            hour: '2-digit',
+            minute: '2-digit'
+          });
           return res.status(400).json({
             success: false,
             error: 'Already checked out today',
-            existingCheckOut: existingTime
+            existingCheckOut: existingTime + ' UTC'
           });
         }
       }
@@ -351,17 +396,12 @@ exports.recordAttendance = async (req, res) => {
     // Set the action time
     attendance[action] = recordTime;
     
-    // Update status if checking out late
-    // if (action === 'checkOut') {
-    //   const checkInTime = attendance.checkIn.getHours() * 60 + attendance.checkIn.getMinutes();
-    //   attendance.status = checkInTime > 10 * 60 ? 'Late' : 'Present';
-    // }
-    
     await attendance.save();
     
-    // Format response
+    // Format response with UTC times
     const formattedDate = recordDate.toISOString().split('T')[0];
     const formattedTime = recordTime.toLocaleTimeString('en-US', {
+      timeZone: 'UTC',
       hour: '2-digit',
       minute: '2-digit',
       hour12: true
@@ -377,10 +417,10 @@ exports.recordAttendance = async (req, res) => {
         },
         date: formattedDate,
         action,
-        time: formattedTime,
+        time: formattedTime + ' UTC',
         status: attendance.status
       },
-      message: `Attendance ${action} recorded successfully for ${formattedDate} at ${formattedTime}`
+      message: `Attendance ${action} recorded successfully for ${formattedDate} at ${formattedTime} UTC`
     });
     
   } catch (err) {
@@ -421,9 +461,11 @@ exports.declareHoliday = async (req, res) => {
       });
     }
     
-    const holidayDate = new Date(date);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Parse date as UTC
+    const [year, month, day] = date.split('-').map(Number);
+    const holidayDate = new Date(Date.UTC(year, month - 1, day));
+    
+    const today = getCurrentUTCDate();
     
     // Prevent declaring holidays in the past (except today)
     if (holidayDate < today) {
@@ -462,12 +504,12 @@ exports.declareHoliday = async (req, res) => {
     res.status(200).json({
       success: true,
       data: {
-        date: holidayDate,
+        date: holidayDate.toISOString().split('T')[0],
         staffCount: activeStaff.length,
         upsertedCount: result.upsertedCount,
         modifiedCount: result.modifiedCount
       },
-      message: `Holiday declared for ${holidayDate.toDateString()}`
+      message: `Holiday declared for ${holidayDate.toISOString().split('T')[0]} (UTC)`
     });
   } catch (err) {
     res.status(500).json({ 
@@ -496,9 +538,11 @@ exports.deleteHoliday = async (req, res) => {
       });
     }
     
-    const holidayDate = new Date(date);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Parse date as UTC
+    const [year, month, day] = date.split('-').map(Number);
+    const holidayDate = new Date(Date.UTC(year, month - 1, day));
+    
+    const today = getCurrentUTCDate();
     
     // Prevent deleting holidays in the past
     if (holidayDate < today) {
@@ -524,10 +568,10 @@ exports.deleteHoliday = async (req, res) => {
     res.status(200).json({
       success: true,
       data: {
-        date: holidayDate,
+        date: holidayDate.toISOString().split('T')[0],
         deletedCount: result.deletedCount
       },
-      message: `Holiday removed for ${holidayDate.toDateString()}`
+      message: `Holiday removed for ${holidayDate.toISOString().split('T')[0]} (UTC)`
     });
   } catch (err) {
     res.status(500).json({ 
@@ -537,7 +581,7 @@ exports.deleteHoliday = async (req, res) => {
   }
 };
 
-// Get attendance by date range
+// Get attendance by date range (UTC dates)
 exports.getAttendanceByDateRange = async (req, res) => {
   try {
     const { startDate, endDate, staffId } = req.query;
@@ -567,9 +611,12 @@ exports.getAttendanceByDateRange = async (req, res) => {
       });
     }
 
-    // Convert to Date objects
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+    // Convert to UTC Date objects
+    const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+    const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+    
+    const start = new Date(Date.UTC(startYear, startMonth - 1, startDay));
+    const end = new Date(Date.UTC(endYear, endMonth - 1, endDay, 23, 59, 59, 999));
     
     // Validate date range
     if (start > end) {
@@ -607,14 +654,24 @@ exports.getAttendanceByDateRange = async (req, res) => {
     const attendance = await Attendance.find(query)
       .populate('staffId', 'name role phone')
       .sort({ date: 1, 'staffId.name': 1 })
-      .lean(); // Convert to plain JS objects
+      .lean();
 
-    // Format dates for better readability
+    // Format dates for better readability (convert UTC to local time for display)
     const formattedResults = attendance.map(record => ({
       ...record,
       date: record.date.toISOString().split('T')[0],
-      checkIn: record.checkIn?.toLocaleTimeString(),
-      checkOut: record.checkOut?.toLocaleTimeString()
+      checkIn: record.checkIn ? new Date(record.checkIn).toLocaleTimeString('en-US', {
+        timeZone: 'Asia/Kolkata',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      }) + ' IST' : null,
+      checkOut: record.checkOut ? new Date(record.checkOut).toLocaleTimeString('en-US', {
+        timeZone: 'Asia/Kolkata',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      }) + ' IST' : null
     }));
 
     res.status(200).json({
@@ -622,7 +679,8 @@ exports.getAttendanceByDateRange = async (req, res) => {
       count: formattedResults.length,
       dateRange: {
         start: start.toISOString().split('T')[0],
-        end: end.toISOString().split('T')[0]
+        end: end.toISOString().split('T')[0],
+        timezone: 'UTC'
       },
       data: formattedResults
     });
@@ -639,7 +697,7 @@ exports.getAttendanceByDateRange = async (req, res) => {
   }
 };
 
-// Get staff attendance summary
+// Get staff attendance summary (UTC dates)
 exports.getAttendanceSummary = async (req, res) => {
   try {
     const { month, year } = req.query;
@@ -654,8 +712,8 @@ exports.getAttendanceSummary = async (req, res) => {
     
     // Default to current month/year if not provided
     const currentDate = new Date();
-    const queryMonth = month ? parseInt(month) : currentDate.getMonth() + 1;
-    const queryYear = year ? parseInt(year) : currentDate.getFullYear();
+    const queryMonth = month ? parseInt(month) : currentDate.getUTCMonth() + 1;
+    const queryYear = year ? parseInt(year) : currentDate.getUTCFullYear();
     
     // Validate month/year
     if (queryMonth < 1 || queryMonth > 12 || queryYear < 2000 || queryYear > 2100) {
@@ -665,9 +723,9 @@ exports.getAttendanceSummary = async (req, res) => {
       });
     }
     
-    // Calculate date range for the month
-    const startDate = new Date(queryYear, queryMonth - 1, 1);
-    const endDate = new Date(queryYear, queryMonth, 0);
+    // Calculate date range for the month (UTC)
+    const startDate = new Date(Date.UTC(queryYear, queryMonth - 1, 1));
+    const endDate = new Date(Date.UTC(queryYear, queryMonth, 0, 23, 59, 59, 999));
     
     // Get all attendance records for the staff member in the specified month
     const attendanceRecords = await Attendance.find({
@@ -683,7 +741,7 @@ exports.getAttendanceSummary = async (req, res) => {
       staffId,
       month: queryMonth,
       year: queryYear,
-      totalDays: endDate.getDate(),
+      totalDays: endDate.getUTCDate(),
       present: 0,
       absent: 0,
       late: 0,
@@ -729,12 +787,10 @@ exports.getAttendanceSummary = async (req, res) => {
   }
 };
 
-
-// Get today's attendance status (present/absent lists)
+// Get today's attendance status (present/absent lists) with UTC
 exports.getTodaysAttendanceStatus = async (req, res) => {
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0); // Normalize to start of day
+    const today = getCurrentUTCDate();
     
     // Get all active staff
     const activeStaff = await Staff.find({ isActive: true }).select('_id name role');
@@ -767,8 +823,18 @@ exports.getTodaysAttendanceStatus = async (req, res) => {
             name: staff.name,
             role: staff.role,
             status: 'Holiday',
-            checkIn: attendanceRecord.checkIn,
-            checkOut: attendanceRecord.checkOut
+            checkIn: attendanceRecord.checkIn ? new Date(attendanceRecord.checkIn).toLocaleTimeString('en-US', {
+              timeZone: 'Asia/Kolkata',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: true
+            }) + ' IST' : null,
+            checkOut: attendanceRecord.checkOut ? new Date(attendanceRecord.checkOut).toLocaleTimeString('en-US', {
+              timeZone: 'Asia/Kolkata',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: true
+            }) + ' IST' : null
           });
         } else {
           presentStaff.push({
@@ -776,8 +842,18 @@ exports.getTodaysAttendanceStatus = async (req, res) => {
             name: staff.name,
             role: staff.role,
             status: attendanceRecord.status,
-            checkIn: attendanceRecord.checkIn,
-            checkOut: attendanceRecord.checkOut,
+            checkIn: attendanceRecord.checkIn ? new Date(attendanceRecord.checkIn).toLocaleTimeString('en-US', {
+              timeZone: 'Asia/Kolkata',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: true
+            }) + ' IST' : null,
+            checkOut: attendanceRecord.checkOut ? new Date(attendanceRecord.checkOut).toLocaleTimeString('en-US', {
+              timeZone: 'Asia/Kolkata',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: true
+            }) + ' IST' : null,
             workingHours: attendanceRecord.workingHours
           });
         }
@@ -791,8 +867,10 @@ exports.getTodaysAttendanceStatus = async (req, res) => {
       }
     });
     
-    // Format today's date for display
-    const formattedDate = today.toLocaleDateString('en-US', {
+    // Format today's date for display (convert UTC to IST)
+    const istDate = new Date(today.getTime() + (5.5 * 60 * 60 * 1000)); // Convert UTC to IST
+    const formattedDate = istDate.toLocaleDateString('en-US', {
+      timeZone: 'Asia/Kolkata',
       weekday: 'long',
       year: 'numeric',
       month: 'long',
@@ -802,7 +880,8 @@ exports.getTodaysAttendanceStatus = async (req, res) => {
     res.status(200).json({
       success: true,
       data: {
-        date: formattedDate,
+        date: formattedDate + ' (IST)',
+        utcDate: today.toISOString().split('T')[0] + ' (UTC)',
         totalStaff: activeStaff.length,
         presentCount: presentStaff.length,
         absentCount: absentStaff.length,
