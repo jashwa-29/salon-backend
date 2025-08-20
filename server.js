@@ -12,7 +12,8 @@ const app = express();
 
 // --- CORS Configuration ---   
 const allowedOrigins = [
-  'https://www.aestheticstudio.in',
+  'https://subtle-pixie-e523ea.netlify.app/',
+  'https://salon-management-website.netlify.app/',
   'http://localhost:5173',
   'https://adminpanel.aestheticstudio.in',
   'http://localhost:3000'
