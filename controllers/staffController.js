@@ -329,17 +329,17 @@ exports.recordAttendance = async (req, res) => {
       recordTime = getCurrentUTCDateTime();
     }
     
-    // Validate that time is not in the future (UTC comparison)
-    const currentUTCTime = getCurrentUTCDateTime();
-    if (recordTime > currentUTCTime) {
-      return res.status(400).json({
-        success: false,
-        error: 'Cannot record attendance for future time',
-        currentUTCTime: currentUTCTime.toISOString(),
-        providedTime: recordTime.toISOString(),
-        suggestion: 'Check your timezone settings'
-      });
-    }
+    // // Validate that time is not in the future (UTC comparison)
+    // const currentUTCTime = getCurrentUTCDateTime();
+    // if (recordTime > currentUTCTime) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     error: 'Cannot record attendance for future time',
+    //     currentUTCTime: currentUTCTime.toISOString(),
+    //     providedTime: recordTime.toISOString(),
+    //     suggestion: 'Check your timezone settings'
+    //   });
+    // }
     
     // Check for existing attendance record
     const existingRecord = await Attendance.findOne({ 
