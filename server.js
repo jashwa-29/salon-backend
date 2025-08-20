@@ -11,28 +11,29 @@ dotenv.config();
 const app = express();
 
 // --- CORS Configuration ---   
-const allowedOrigins = [
-  'https://subtle-pixie-e523ea.netlify.app/',
-  'https://salon-management-website.netlify.app/',
-  'http://localhost:5173',
-  'https://adminpanel.aestheticstudio.in',
-  'http://localhost:3000'
-];
+// const allowedOrigins = [
+//   'https://subtle-pixie-e523ea.netlify.app/',
+//   'https://salon-management-website.netlify.app/',
+//   'http://localhost:5173',
+//   'https://adminpanel.aestheticstudio.in',
+//   'http://localhost:3000'
+// ];
 
-const corsOptions = {
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl)
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-};
+// const corsOptions = {
+//   origin: function (origin, callback) {
+//     // Allow requests with no origin (like mobile apps or curl)
+//     if (!origin || allowedOrigins.includes(origin)) {
+//       callback(null, true);
+//     } else {
+//       callback(new Error('Not allowed by CORS'));
+//     }
+//   },
+//   credentials: true,
+// };
 
-// Enable CORS for all routes including preflight
-app.use(cors(corsOptions));
+
+// app.use(cors(corsOptions));
+app.use(cors());
 
 // --- Middleware ---
 app.use(express.json());
