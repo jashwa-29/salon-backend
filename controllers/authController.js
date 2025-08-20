@@ -19,56 +19,65 @@ exports.register = async (req, res) => {
       return res.status(400).json({ message: 'Email already registered' });
     }
 
-    // Check for existing customer by phone or email
-    const existingCustomer = await Customer.findOne({
-      $or: [{ email }, { phone }]
-    });
-
     // Create new user
     const user = new User({ name, email, password, role, phone });
     await user.save();
 
-    // Handle customer record
-    let customer;
-    if (existingCustomer) {
-      // Update existing customer
-      existingCustomer.isRegisteredUser = true;
-      existingCustomer.userId = user._id;
-      existingCustomer.email = email; // Update email if different
-      existingCustomer.name = name; // Update name if different
-      customer = await existingCustomer.save();
-    } else {
-      // Create new customer
-      customer = new Customer({
-        name,
-        email,
-        phone,
-        isRegisteredUser: true,
-        userId: user._id
+    // Handle customer record - ONLY for users with 'customer' role
+    let customer = null;
+    if (role === 'customer') {
+      // Check for existing customer by phone or email
+      const existingCustomer = await Customer.findOne({
+        $or: [{ email }, { phone }]
       });
-      await customer.save();
-    }
 
-    // Update user with customer reference
-    user.customer = customer._id;
-    await user.save();
+      if (existingCustomer) {
+        // Update existing customer
+        existingCustomer.isRegisteredUser = true;
+        existingCustomer.userId = user._id;
+        existingCustomer.email = email; // Update email if different
+        existingCustomer.name = name; // Update name if different
+        customer = await existingCustomer.save();
+      } else {
+        // Create new customer
+        customer = new Customer({
+          name,
+          email,
+          phone,
+          isRegisteredUser: true,
+          userId: user._id
+        });
+        await customer.save();
+      }
+
+      // Update user with customer reference
+      user.customer = customer._id;
+      await user.save();
+    }
 
     // Generate token
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
       expiresIn: '7d'
     });
 
-    res.status(201).json({
+    // Prepare response
+    const responseData = {
       token,
       user: {
         id: user._id,
         name: user.name,
         email: user.email,
         role: user.role,
-        phone: user.phone,
-        customerId: customer.customerId
+        phone: user.phone
       }
-    });
+    };
+
+    // Add customerId to response if user is a customer
+    if (role === 'customer' && customer) {
+      responseData.user.customerId = customer.customerId;
+    }
+
+    res.status(201).json(responseData);
 
   } catch (err) {
     console.error(err);
