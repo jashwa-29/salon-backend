@@ -684,7 +684,7 @@ exports.getAttendanceByDateRange = async (req, res) => {
       },
       data: formattedResults
     });
-    console.log('Attendance records retrieved successfully:', formattedResults.length);
+    console.log('Attendance records retrieved successfully:', formattedResults);
 
   } catch (err) {
     console.error('Error in getAttendanceByDateRange:', err);
