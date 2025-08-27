@@ -68,7 +68,10 @@ exports.register = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
-        phone: user.phone
+        phone: user.phone ,
+         date: new Date()
+        
+
       }
     };
 
