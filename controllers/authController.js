@@ -120,7 +120,7 @@ exports.login = async (req, res) => {
       expiresIn: '7d'
     });
 
-    res.json({ token, user: { id: user._id, name: user.name, email, role: user.role , ,
+    res.json({ token, user: { id: user._id, name: user.name, email, role: user.role , 
          date: new Date() } });
   } catch (err) {
     console.error(err);
